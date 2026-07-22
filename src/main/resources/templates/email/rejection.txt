@@ -1,0 +1,7 @@
+Dear {{name}},
+
+Your application for {{vacancy}} was not successful.
+Reason: {{reason}}
+
+Best regards,
+AzTU HR Department

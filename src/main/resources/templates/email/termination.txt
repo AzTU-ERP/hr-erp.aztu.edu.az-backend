@@ -1,0 +1,7 @@
+Dear {{name}},
+
+Your employment has been terminated.
+Reason: {{reason}}
+
+Best regards,
+AzTU HR Department
