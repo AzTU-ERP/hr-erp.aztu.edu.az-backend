@@ -12,7 +12,14 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-/** Validates the SSO bearer token on each request and populates the SecurityContext with roles. */
+/**
+ * Validates the SSO bearer token on each request and populates the SecurityContext with the
+ * authorities the token carries.
+ *
+ * <p>Authorities are taken <em>verbatim</em>. auth-erp emits role grants already {@code ROLE_}-
+ * prefixed ({@code ROLE_super_admin}) next to bare permission codes ({@code hr.staff.manage}), so
+ * prefixing here would both corrupt permission codes and double-prefix roles.
+ */
 public class SsoAuthenticationFilter extends OncePerRequestFilter {
 
     private final SsoClient ssoClient;
@@ -29,8 +36,8 @@ public class SsoAuthenticationFilter extends OncePerRequestFilter {
             String token = header.substring(7).trim();
             Optional<SsoUser> user = ssoClient.validate(token);
             user.ifPresent(u -> {
-                List<SimpleGrantedAuthority> authorities = u.roles().stream()
-                        .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
+                List<SimpleGrantedAuthority> authorities = u.authorities().stream()
+                        .map(SimpleGrantedAuthority::new)
                         .toList();
                 SecurityContextHolder.getContext().setAuthentication(
                         new SsoAuthenticationToken(u, authorities));
