@@ -11,9 +11,24 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 
-/** SSO-based stateless security. Public karyera endpoints are open; HR admin endpoints require hr_admin. */
+/**
+ * SSO-based stateless security. Public karyera endpoints are open; everything under {@code /api}
+ * requires an auth-erp token carrying HR access.
+ *
+ * <p>Authorization keys off the <em>permission</em> {@code hr.staff.manage} rather than a role name.
+ * auth-erp's role codes are not platform-scoped — every platform has its own {@code admin} role and
+ * they all collapse to the authority {@code ROLE_admin} — so a role check cannot tell an HR admin
+ * from an LMS admin. Its permission codes <em>are</em> platform-scoped: {@code hr.staff.manage} is
+ * seeded only under the HR platform and granted to the HR admin and hr_officer roles, so an LMS-only
+ * admin never holds it. {@code ROLE_super_admin} is global and bypasses platform scoping by design.
+ */
 @Configuration
 public class SecurityConfig {
+
+    /** Global cross-platform administrator in auth-erp; reaches every platform by design. */
+    private static final String SUPER_ADMIN = "ROLE_super_admin";
+    /** HR-platform permission held by the HR admin and hr_officer roles, and by nobody else. */
+    private static final String HR_ACCESS = "hr.staff.manage";
 
     private final SsoClient ssoClient;
     private final CorsConfigurationSource corsConfigurationSource;
@@ -34,7 +49,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/public/**").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                 .requestMatchers("/error").permitAll()
-                .requestMatchers("/api/**").hasRole("hr_admin")
+                .requestMatchers("/api/**").hasAnyAuthority(SUPER_ADMIN, HR_ACCESS)
                 .anyRequest().permitAll())
             .addFilterBefore(new SsoAuthenticationFilter(ssoClient), UsernamePasswordAuthenticationFilter.class)
             .exceptionHandling(ex -> ex
