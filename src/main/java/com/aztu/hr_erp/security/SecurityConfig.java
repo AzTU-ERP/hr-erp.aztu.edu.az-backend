@@ -49,8 +49,10 @@ public class SecurityConfig {
                 .requestMatchers("/api/public/**").permitAll()
                 .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                 .requestMatchers("/error").permitAll()
+                // OpenAPI spec + Swagger UI (springdoc)
+                .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                 .requestMatchers("/api/**").hasAnyAuthority(SUPER_ADMIN, HR_ACCESS)
-                .anyRequest().permitAll())
+                .anyRequest().authenticated())
             // SSO auth first, then account-state enforcement on the resulting principal.
             .addFilterBefore(new SsoAuthenticationFilter(ssoClient), UsernamePasswordAuthenticationFilter.class)
             .addFilterAfter(new AccountStateFilter(), SsoAuthenticationFilter.class)
