@@ -32,6 +32,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -41,6 +43,8 @@ import org.springframework.web.multipart.MultipartFile;
 /** Onboarding lifecycle: approval -> employee -> documents/contracts -> active. Emits Finance/Turnstile events. */
 @Service
 public class EmployeeService {
+
+    private static final Logger log = LoggerFactory.getLogger(EmployeeService.class);
 
     /** The minimal document set required before an employee becomes official. */
     private static final List<String> REQUIRED_OFFICIAL_DOCS =
@@ -99,6 +103,17 @@ public class EmployeeService {
         // Turnstile: staff_created (personal details, job_type)
         integrationEventService.emit(TargetSystem.TURNSTILE, EventType.STAFF_CREATED,
                 employee.getEmployeeId(), staffPayload(employee, applicant));
+        // Auth: staff_created — provisions the SSO account and writes back employees.user_id.
+        // Routed through the outbox rather than called inline so a slow or unavailable auth service
+        // cannot fail the approval transaction; the worker retries and records last_error.
+        if (applicant != null && applicant.getEmail() != null && !applicant.getEmail().isBlank()) {
+            integrationEventService.emit(TargetSystem.AUTH, EventType.STAFF_CREATED,
+                    employee.getEmployeeId(), staffPayload(employee, applicant));
+        } else {
+            log.warn("Employee {} has no applicant email; skipping auth provisioning "
+                    + "(link an account later via PATCH /api/employees/{}/user)",
+                    employee.getEmployeeId(), employee.getEmployeeId());
+        }
         return employee;
     }
 
