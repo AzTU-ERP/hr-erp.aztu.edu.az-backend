@@ -51,7 +51,9 @@ public class SecurityConfig {
                 .requestMatchers("/error").permitAll()
                 .requestMatchers("/api/**").hasAnyAuthority(SUPER_ADMIN, HR_ACCESS)
                 .anyRequest().permitAll())
+            // SSO auth first, then account-state enforcement on the resulting principal.
             .addFilterBefore(new SsoAuthenticationFilter(ssoClient), UsernamePasswordAuthenticationFilter.class)
+            .addFilterAfter(new AccountStateFilter(), SsoAuthenticationFilter.class)
             .exceptionHandling(ex -> ex
                 .authenticationEntryPoint((req, res, e) -> write(res, HttpStatus.UNAUTHORIZED, "Authentication is required"))
                 .accessDeniedHandler((req, res, e) -> write(res, HttpStatus.FORBIDDEN, "You are not authorized to perform this action")));
