@@ -31,3 +31,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Runtime upload storage (app.storage.base-path) — never version-controlled.
+hr-storage/
