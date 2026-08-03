@@ -1,0 +1,174 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  # Never let two deploys race onto the VPS.
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build:
+    name: Build & test
+    runs-on: ubuntu-latest
+
+    # HrErpApplicationTests.contextLoads is NOT disabled and needs a real database —
+    # it is what proves Flyway's schema still matches the JPA entities
+    # (spring.jpa.hibernate.ddl-auto=validate). The defaults in
+    # application.properties already point at exactly this service.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: mydatabase
+          POSTGRES_USER: myuser
+          POSTGRES_PASSWORD: secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U myuser -d mydatabase"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Verify
+        run: ./mvnw -B -ntp verify
+
+  publish:
+    name: Build & push image
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to VPS
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Render hr.env
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          MAIL_HOST: ${{ secrets.MAIL_HOST }}
+          MAIL_PORT: ${{ secrets.MAIL_PORT }}
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          AUTH_BASE_URL: ${{ secrets.AUTH_BASE_URL }}
+          AUTH_CLIENT_ID: ${{ secrets.AUTH_CLIENT_ID }}
+          AUTH_CLIENT_SECRET: ${{ secrets.AUTH_CLIENT_SECRET }}
+          SSO_JWKS_URI: ${{ secrets.SSO_JWKS_URI }}
+          SSO_ISSUER: ${{ secrets.SSO_ISSUER }}
+          CORS_ORIGINS: ${{ secrets.CORS_ORIGINS }}
+        run: |
+          set -euo pipefail
+          {
+            printf 'SPRING_PROFILES_ACTIVE=prod\n'
+            printf 'SERVER_PORT=8082\n'
+            printf 'STORAGE_BASE_PATH=/app/hr-storage\n'
+            printf 'DB_URL=%s\n'      "$DB_URL"
+            printf 'DB_USERNAME=%s\n' "$DB_USERNAME"
+            printf 'DB_PASSWORD=%s\n' "$DB_PASSWORD"
+            printf 'MAIL_HOST=%s\n'     "$MAIL_HOST"
+            printf 'MAIL_PORT=%s\n'     "${MAIL_PORT:-587}"
+            printf 'MAIL_USERNAME=%s\n' "$MAIL_USERNAME"
+            printf 'MAIL_PASSWORD=%s\n' "$MAIL_PASSWORD"
+            printf 'MAIL_FROM=%s\n'     "${MAIL_FROM:-hr@aztu.edu.az}"
+            # Must match auth-erp's AUTH_HR_CLIENT_ID / AUTH_HR_CLIENT_SECRET exactly.
+            printf 'AUTH_BASE_URL=%s\n'      "$AUTH_BASE_URL"
+            printf 'AUTH_CLIENT_ID=%s\n'     "$AUTH_CLIENT_ID"
+            printf 'AUTH_CLIENT_SECRET=%s\n' "$AUTH_CLIENT_SECRET"
+            # SSO_ISSUER is a claim value to compare against, NOT a URL that gets fetched.
+            printf 'SSO_JWKS_URI=%s\n' "$SSO_JWKS_URI"
+            printf 'SSO_ISSUER=%s\n'   "$SSO_ISSUER"
+            printf 'CORS_ORIGINS=%s\n' "$CORS_ORIGINS"
+          } > hr.env
+
+      - name: Copy hr.env to the VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: hr.env
+          target: ${{ secrets.VPS_APP_DIR || '/opt/aztu-erp' }}
+          overwrite: true
+
+      - name: Pull & restart
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.VPS_APP_DIR || '/opt/aztu-erp' }}"
+            chmod 600 hr.env
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            docker compose pull hr-erp
+            docker compose up -d hr-erp
+            docker image prune -f
+            # hr-erp has no actuator, so probe a permitAll endpoint instead.
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8082/api/public/vacancies >/dev/null 2>&1; then
+                echo "hr-erp healthy"; exit 0
+              fi
+              sleep 5
+            done
+            echo "hr-erp did not become healthy — recent logs:"
+            docker compose logs --tail=80 hr-erp
+            exit 1
