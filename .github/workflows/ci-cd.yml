@@ -161,8 +161,12 @@ jobs:
             cd "${{ secrets.VPS_APP_DIR || '/opt/onecampus' }}"
             chmod 600 hr.env
             # Only needed while the package is private; a public package pulls anonymously.
+            # Non-fatal on purpose: the host may already hold valid credentials in
+            # ~/.docker/config.json, and a bad token here should not be worse than no token.
+            # The pull below is the real test.
             if [ -n "${{ secrets.GHCR_TOKEN }}" ]; then
-              echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+              echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin \
+                || echo "WARN: docker login failed — falling back to any credentials already on the host"
             fi
             docker compose pull hr-erp
             docker compose up -d hr-erp
