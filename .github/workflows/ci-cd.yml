@@ -143,7 +143,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           source: hr.env
-          target: ${{ secrets.VPS_APP_DIR || '/opt/aztu-erp' }}
+          target: ${{ secrets.VPS_APP_DIR || '/opt/onecampus' }}
           overwrite: true
 
       - name: Pull & restart
@@ -156,7 +156,7 @@ jobs:
           script_stop: true
           script: |
             set -euo pipefail
-            cd "${{ secrets.VPS_APP_DIR || '/opt/aztu-erp' }}"
+            cd "${{ secrets.VPS_APP_DIR || '/opt/onecampus' }}"
             chmod 600 hr.env
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
             docker compose pull hr-erp
