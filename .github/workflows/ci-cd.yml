@@ -160,7 +160,10 @@ jobs:
             set -euo pipefail
             cd "${{ secrets.VPS_APP_DIR || '/opt/onecampus' }}"
             chmod 600 hr.env
-            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            # Only needed while the package is private; a public package pulls anonymously.
+            if [ -n "${{ secrets.GHCR_TOKEN }}" ]; then
+              echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            fi
             docker compose pull hr-erp
             docker compose up -d hr-erp
             docker image prune -f
