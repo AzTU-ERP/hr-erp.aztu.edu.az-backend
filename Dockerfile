@@ -27,5 +27,6 @@ COPY --from=build /workspace/target/*.jar app.jar
 RUN chown app:app app.jar
 USER app
 
-EXPOSE 8080
+# Matches server.port's default (8082); auth-erp owns 8080. Override both with SERVER_PORT.
+EXPOSE 8082
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/app.jar"]
