@@ -93,7 +93,9 @@ jobs:
     needs: publish
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: production
+    # To gate production deploys behind a manual approval, create an environment named
+    # "production" (Settings -> Environments) and uncomment the line below.
+    # environment: production
     steps:
       - name: Render hr.env
         env:
