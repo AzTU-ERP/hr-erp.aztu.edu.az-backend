@@ -160,6 +160,15 @@ jobs:
             set -euo pipefail
             cd "${{ secrets.VPS_APP_DIR || '/opt/onecampus' }}"
             chmod 600 hr.env
+            # Temporary: the pull keeps failing with "unauthorized". Docker credentials are
+            # per-user, so report which user this is and whether that user holds a ghcr.io
+            # entry — the two things that decide whether the pull can succeed.
+            echo "--- deploy context ---"
+            echo "user            : $(whoami)"
+            echo "home            : $HOME"
+            echo "ghcr.io in creds: $(grep -c 'ghcr.io' "$HOME/.docker/config.json" 2>/dev/null || echo 0)"
+            echo "GHCR_TOKEN set  : $([ -n "${{ secrets.GHCR_TOKEN }}" ] && echo yes || echo no)"
+            echo "----------------------"
             # Only needed while the package is private; a public package pulls anonymously.
             # Non-fatal on purpose: the host may already hold valid credentials in
             # ~/.docker/config.json, and a bad token here should not be worse than no token.
